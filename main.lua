@@ -1,68 +1,53 @@
 
 --[[
 
+UI plan:
 
-LL enable/disable LoopLlama
+    - The user needs this in input.conf:
 
+        l ignore
 
-Category    | Lua | Shortcut  | Operation
------------------------------------------------------------------------
-Play video  | .   | .         | .
-.           | .   | F         | Set or switch to a favorite video
-Navigation  | .   | .         | .
-.           | .   | 0 or UP   | Go to video start (or loop start, if looping)
-Looping     | .   | .         | .
-.           | .   | L         | Toggle looping on/off
-.           | .   | [         | Set loop start to current time
-.           | .   | SHIFT-[   | Set, nudge, or reset loop start (prompted)
-.           | .   | ]         | Set loop end to current time
-.           | .   | SHIFT-]   | Set, nudge, or reset loop end (prompted)
-.           | .   | SHIFT-L   | Saved loops: load, save, or reset (prompted)
-Marks       | .   | .         | .
-.           | .   | 1         | Go to mark 1
-.           | .   | SHIFT-1   | Set, nudge, or reset mark 1
-Application | .   | .         | .
-.           | .   | H         | Display/hide help text
+    - Bindings:
 
+        - Except as noted, no modifier keys are used.
 
-Key bindings:
+        - Key binding footprint:
 
-    - Except as noted, no modifier keys are used.
+            - Default: L l 0-9 [ ]
+            - Minimal: L l 0 [ ]
 
-    - The user needs this in input.conf: `l ignore`.
+        # Toggle the script's bindings.
+        L    LoopLlama toggle              # SHIFT
 
-    # Toggle the script's bindings.
-    L    LoopLlama toggle              # SHIFT
+        # Jump.
+        0    to start
+        1-9  to mark
 
-    # Jump.
-    0    to start
-    1-9  to mark
+        # Simple looping.
+        [    set loop start
+        ]    set loop end
+        l-l  toggle looping
 
-    # Simple looping.
-    [    set loop start
-    ]    set loop end
-    l-l  toggle looping
+        # Manage settings.
+        l-p  loop start/end points
+        l-f  favorites
+        l-m  marks
+        l-s  saved loops
 
-    # Manage settings.
-    l-p  loop start/end points
-    l-f  favorites
-    l-m  marks
-    l-s  saved loops
+        # Information.
+        l-h  help on key bindings
+        l-i  info on current loop, favs, marks, saved loops
 
-    # Information.
-    l-h  help on key bindings
-    l-i  info on current loop, favs, marks, saved loops
-
-    # Manage settings: user prompt syntax:
+    - Manage settings: user prompt syntax:
 
         - Loop start/end points:
 
             Where X: s|start|e|end
 
-            set-to-current-pos | X .
-            set-to-value       | X M:SS
-            nudge              | X N
-            reset              | X -
+            set-to-current | X .
+            set-to-time    | X M:SS
+            nudge          | X N
+            reset          | X -
 
         - Favorites:
 
@@ -77,27 +62,31 @@ Key bindings:
 
             Where M: mark number
 
-            jump-to            | M
-            set-to-current-pos | M .
-            set-to-value       | M M:SS
-            nudge              | M N
-            unset              | M -
+            jump-to        | M
+            set-to-current | M .
+            set-to-time    | M M:SS
+            nudge          | M N
+            unset          | M -
 
         - Saved loops:
 
             Where K: saved loop key
 
-            load              | K
-            save-current-loop | K .
-            save-loop         | K M:SS M:SS
-            nudge-saved       | K N N
-            unset             | K -
+            load         | K
+            save-current | K .
+            save-loop    | K M:SS M:SS
+            nudge-saved  | K N N
+            unset        | K -
 
 --]]
+
 
 local mp = require('mp')
 local utils = require('mp.utils')
 local assdraw = require('mp.assdraw')
+
+package.path = mp.command_native({'expand-path', '~~/script-modules/?.lua;'}) .. package.path
+local input = require 'user-input-module'
 
 local EMPTY = '_'
 
@@ -111,21 +100,94 @@ looping = false
 
 function message(text, duration)
     local ass = mp.get_property_osd('osd-ass-cc/0')
-    ass = ass .. text
-    return mp.osd_message(ass, duration or options.message_duration)
+    return mp.osd_message(ass .. text, duration or options.message_duration)
+end
+
+function get_reply(prompt, handler, default, forward)
+    local t = {
+        request_text = prompt,
+        default_input = default,
+        source = 'LoopLlama',
+    }
+    input.get_user_input(handler, t, forward)
+end
+
+function handle_fubb_reply(reply, err, k)
+    message(k .. reply)
+end
+
+function show_text(text, duration, font_size)
+    mp.command(
+        'show-text "${osd-ass-cc/0}{\\\\fs' ..
+        font_size ..
+        '}' .. 
+        '{\\\\pos(10,10)}' ..
+        text ..
+        '${osd-ass-cc/1}' ..
+        '" ' ..
+        duration
+    )
+
+    sleep(1)
+    mp.command(
+        'show-text "${osd-ass-cc/0}{\\\\fs' ..
+        font_size ..
+        '}' .. 
+        '{\\\\pos(90,90)}' ..
+        text ..
+        '${osd-ass-cc/1}' ..
+        '" ' ..
+        duration
+    )
+
+end
+
+function sleep(n)
+  os.execute("sleep " .. tonumber(n))
 end
 
 function drawMenu()
-    local window_w, window_h = mp.get_osd_size()
-    local ass = assdraw.ass_new()
-    ass:new_event()
-    ass:append(" \\N\\N")
-    ass:append("{\\b1}Multiloop{\\b0}\\N")
-    ass:append("{\\b1}1{\\b0} set start time\\N")
-    ass:append("{\\b1}2{\\b0} set end time\\N")
-    ass:append("{\\b1}l{\\b0} loop / end loop\\N")
-    ass:append("{\\b1}ESC{\\b0} hide\\N")
-    mp.set_osd_ass(window_w, window_h, ass.text)
+    --[[
+
+    # Font size
+
+        "{\\fs10}"
+
+    ass:append("{\\pos(200,200)}")
+
+    ass:append("{\\fnTimes New Roman}")
+
+    --]]
+    --
+    if false then
+
+        -- show_text('{\\\\b1}LoopLlama{\\\\b0}: loop and scoop', 3000, 10)
+        -- message("{\\fs10}{\\b1}LoopLlama{\\b0}\\N")
+
+    else
+
+        local window_w, window_h = mp.get_osd_size()
+
+        -- local ass = assdraw.ass_new()
+        -- ass:new_event()
+        -- ass:append("{\\pos(300,100)}300,100\\N")
+        -- mp.set_osd_ass(window_w, window_h, ass.text)
+
+        ass = assdraw.ass_new()
+        ass:new_event()
+        ass:append("{\\pos(100,100)}{\\b1}LoopLlama{\\b0}\\N")
+        ass:new_event()
+        ass:append("{\\pos(100,500)}{\\b1}LoopLlama{\\b0}\\N")
+        ass:new_event()
+        ass:append("{\\pos(500,100)}{\\b1}LoopLlama{\\b0}\\N")
+        ass:new_event()
+        ass:append("{\\pos(500,500)}{\\b1}LoopLlama{\\b0}\\N")
+        mp.set_osd_ass(window_w, window_h, ass.text)
+
+        get_reply('Enter message:', handle_fubb_reply, nil, 'PREFIX - ')
+
+    end
+
 end
 
 function clearMenu()
