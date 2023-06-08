@@ -42,12 +42,12 @@ UI plan:
 
         - Loop start/end points:
 
-            Where X: s|start|e|end
+            Where B: [ or ]
 
-            set-to-current | X .
-            set-to-time    | X M:SS
-            nudge          | X N
-            reset          | X -
+            set-to-current | B .
+            set-to-time    | B M:SS
+            nudge          | B N.N
+            reset          | B -
 
         - Favorites:
 
@@ -65,7 +65,7 @@ UI plan:
             jump-to        | M
             set-to-current | M .
             set-to-time    | M M:SS
-            nudge          | M N
+            nudge          | M N.N
             unset          | M -
 
         - Saved loops:
@@ -75,8 +75,83 @@ UI plan:
             load         | K
             save-current | K .
             save-loop    | K M:SS M:SS
-            nudge-saved  | K N N
+            nudge-saved  | K N.N N.N
             unset        | K -
+
+    - Parsing the manage-settings inputs:
+
+        .
+        -
+        [
+        ]
+        N
+        N.N
+        M:SS
+        KEY     # Non-space
+        PATH    # Trimmed text
+
+        =========
+
+        My first sketch is shown below: it's a generic token-parsing approach.
+
+        Better would be to also have parse-definitons:
+
+            def identity(x):
+                return x
+
+            TOKDEFS = {
+                dot = {
+                    name = 'dot',
+                    patt = '.',
+                    unpack = identity,
+                },
+                minus = {...},
+                ...
+            }
+
+            B = TOKDEFS.bracket
+
+            PARSEDEFS = {
+                current_loop = {
+                    name = 'current_loop',
+                    definitions = {
+                        {B, TOKDEFS.dot},
+                        {B, TOKDEFS.min_sec},
+                        {B, TOKDEFS.number},
+                        {B, TOKDEFS.minus},
+                    },
+                },
+                ...
+            }
+
+            Then, parsing involves getting the relevant parse-def. Try each
+            definition of tokdefs until one matches the full reply.
+
+        =========
+
+        def parse_user_reply(txt):
+            tokens = []
+            txt = lstrip(txt + ' ')
+            while txt:
+                tok = parse_next_token(txt)
+                if tok:
+                    tokens.append(tok)
+                    txt = lstrip(txt[len(tok.txt) : None])
+                else:
+                    raise 'invalid reply'
+            return tokens
+
+        def parse_next_token(txt):
+            for td in TOKDEFS:
+                patt = '^' + td.patt + ' '
+                m = re.search(patt, txt)
+                if m:
+                    return {
+                        name: td.name,
+                        txt: m(0),
+                        val: td.unpack(m),
+                    }
+            return None
 
 --]]
 
