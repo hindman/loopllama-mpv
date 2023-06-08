@@ -1,0 +1,205 @@
+--------
+toc: Table of contents
+--------
+
+    toc        | Table of contents
+    todos      | TODOs
+    dev-notes  | Dev notes
+    misc-notes | Misc notes
+
+--------
+todos: TODOs
+--------
+
+NEXT:
+
+    - Minimal prototype:
+
+        - Bindings:
+            L
+            [  ]
+            l-l
+            l-m
+            1  2
+
+        - Toggle app shortcuts:
+            - Set/unset the app's key bindings.
+
+        - Basic looping:
+            - Set start/end to current time
+            - Toggle.
+
+        - Basic marks:
+            - Set mark to current time.
+            - Jump to mark.
+
+        - Persistence:
+            - Load on start.
+            - Save on shutdown.
+
+--------
+dev-notes: Dev notes
+--------
+
+--------
+misc-notes: Misc notes
+--------
+
+User setup/installation:
+
+    - Clone repo inside ~/.config/mpv/scripts.
+
+    - Optionally, remove the .git subdirectory.
+
+    - Add this to input.conf:
+
+        l ignore
+
+Key bindings:
+
+    - Except as noted, no modifier keys are used.
+
+    - Key binding footprint:
+
+        - Minimal: L l 0 [ ]
+        - Default: adds 1-9
+
+    # Toggle the script's bindings.
+    L    LoopLlama toggle              # SHIFT
+
+    # Jump.
+    0    to start
+    1-9  to mark
+
+    # Simple looping.
+    [    set loop start
+    ]    set loop end
+    l-l  toggle looping
+
+    # Manage settings.
+    l-p  loop start/end points
+    l-f  favorites
+    l-m  marks
+    l-s  saved loops
+
+    # Information.
+    l-h  help on key bindings
+    l-i  info on current loop, favs, marks, saved loops
+
+Manage settings: user prompt syntax:
+
+    - Loop start/end points:
+
+        Where B: [ or ]
+
+        set-to-current | B .
+        set-to-time    | B M:SS
+        nudge          | B N.N
+        reset          | B -
+
+    - Favorites:
+
+        Where K: favorite key
+
+        switch-to      | K
+        set-to-current | K .
+        set-to-path    | K PATH
+        unset          | K -
+
+    - Marks:
+
+        Where M: mark number
+
+        jump-to        | M
+        set-to-current | M .
+        set-to-time    | M M:SS
+        nudge          | M N.N
+        unset          | M -
+
+    - Saved loops:
+
+        Where K: saved loop key
+
+        load         | K
+        save-current | K .
+        save-loop    | K M:SS M:SS
+        nudge-saved  | K N.N N.N
+        unset        | K -
+
+Parsing the manage-settings inputs:
+
+    .
+    -
+    [
+    ]
+    N
+    N.N
+    M:SS
+    KEY     # Non-space
+    PATH    # Trimmed text
+
+    =========
+
+    My first sketch is shown below: it's a generic token-parsing approach. The
+    difficulty lies in the last two tokens: KEY and PATH. There is no way to
+    distinguish them.
+
+    Better would be to also have parse-definitons:
+
+        def identity(x):
+            return x
+
+        TOKDEFS = {
+            dot = {
+                name = 'dot',
+                patt = '.',
+                unpack = identity,
+            },
+            minus = {...},
+            ...
+        }
+
+        B = TOKDEFS.bracket
+
+        PARSEDEFS = {
+            current_loop = {
+                name = 'current_loop',
+                definitions = {
+                    {B, TOKDEFS.dot},
+                    {B, TOKDEFS.min_sec},
+                    {B, TOKDEFS.number},
+                    {B, TOKDEFS.minus},
+                },
+            },
+            ...
+        }
+
+        Then, parsing involves getting the relevant parse-def. Try each
+        definition of tokdefs until one matches the full reply.
+
+    =========
+
+    def parse_user_reply(txt):
+        tokens = []
+        txt = lstrip(txt + ' ')
+        while txt:
+            tok = parse_next_token(txt)
+            if tok:
+                tokens.append(tok)
+                txt = lstrip(txt[len(tok.txt) : None])
+            else:
+                raise 'invalid reply'
+        return tokens
+
+    def parse_next_token(txt):
+        for td in TOKDEFS:
+            patt = '^' + td.patt + ' '
+            m = re.search(patt, txt)
+            if m:
+                return {
+                    name: td.name,
+                    txt: m(0),
+                    val: td.unpack(m),
+                }
+        return None
+

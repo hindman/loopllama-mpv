@@ -1,278 +1,88 @@
+--
+-- Imports.
+--
 
---[[
-
-UI plan:
-
-    - The user needs this in input.conf:
-
-        l ignore
-
-    - Bindings:
-
-        - Except as noted, no modifier keys are used.
-
-        - Key binding footprint:
-
-            - Default: L l 0-9 [ ]
-            - Minimal: L l 0 [ ]
-
-        # Toggle the script's bindings.
-        L    LoopLlama toggle              # SHIFT
-
-        # Jump.
-        0    to start
-        1-9  to mark
-
-        # Simple looping.
-        [    set loop start
-        ]    set loop end
-        l-l  toggle looping
-
-        # Manage settings.
-        l-p  loop start/end points
-        l-f  favorites
-        l-m  marks
-        l-s  saved loops
-
-        # Information.
-        l-h  help on key bindings
-        l-i  info on current loop, favs, marks, saved loops
-
-    - Manage settings: user prompt syntax:
-
-        - Loop start/end points:
-
-            Where B: [ or ]
-
-            set-to-current | B .
-            set-to-time    | B M:SS
-            nudge          | B N.N
-            reset          | B -
-
-        - Favorites:
-
-            Where K: favorite key
-
-            switch-to      | K
-            set-to-current | K .
-            set-to-path    | K PATH
-            unset          | K -
-
-        - Marks:
-
-            Where M: mark number
-
-            jump-to        | M
-            set-to-current | M .
-            set-to-time    | M M:SS
-            nudge          | M N.N
-            unset          | M -
-
-        - Saved loops:
-
-            Where K: saved loop key
-
-            load         | K
-            save-current | K .
-            save-loop    | K M:SS M:SS
-            nudge-saved  | K N.N N.N
-            unset        | K -
-
-    - Parsing the manage-settings inputs:
-
-        .
-        -
-        [
-        ]
-        N
-        N.N
-        M:SS
-        KEY     # Non-space
-        PATH    # Trimmed text
-
-        =========
-
-        My first sketch is shown below: it's a generic token-parsing approach.
-
-        Better would be to also have parse-definitons:
-
-            def identity(x):
-                return x
-
-            TOKDEFS = {
-                dot = {
-                    name = 'dot',
-                    patt = '.',
-                    unpack = identity,
-                },
-                minus = {...},
-                ...
-            }
-
-            B = TOKDEFS.bracket
-
-            PARSEDEFS = {
-                current_loop = {
-                    name = 'current_loop',
-                    definitions = {
-                        {B, TOKDEFS.dot},
-                        {B, TOKDEFS.min_sec},
-                        {B, TOKDEFS.number},
-                        {B, TOKDEFS.minus},
-                    },
-                },
-                ...
-            }
-
-            Then, parsing involves getting the relevant parse-def. Try each
-            definition of tokdefs until one matches the full reply.
-
-        =========
-
-        def parse_user_reply(txt):
-            tokens = []
-            txt = lstrip(txt + ' ')
-            while txt:
-                tok = parse_next_token(txt)
-                if tok:
-                    tokens.append(tok)
-                    txt = lstrip(txt[len(tok.txt) : None])
-                else:
-                    raise 'invalid reply'
-            return tokens
-
-        def parse_next_token(txt):
-            for td in TOKDEFS:
-                patt = '^' + td.patt + ' '
-                m = re.search(patt, txt)
-                if m:
-                    return {
-                        name: td.name,
-                        txt: m(0),
-                        val: td.unpack(m),
-                    }
-            return None
-
---]]
-
+package.path = mp.command_native({'expand-path', '~~/script-modules/?.lua;'}) .. package.path
 
 local mp = require('mp')
 local utils = require('mp.utils')
 local assdraw = require('mp.assdraw')
-
-package.path = mp.command_native({'expand-path', '~~/script-modules/?.lua;'}) .. package.path
 local input = require 'user-input-module'
 
-local EMPTY = '_'
+--
+-- Constants.
+--
 
-local options = {
+local DEFS = {
+    empty = '_',
     keybind = 'L',
     message_duration = 2
 }
 
-local ab = {start = nil, stop = nil}
-looping = false
+--
+-- Overall state for the app and the current video.
+--
 
-function message(text, duration)
-    local ass = mp.get_property_osd('osd-ass-cc/0')
-    return mp.osd_message(ass .. text, duration or options.message_duration)
+local app = {
+    keys_bound = false,
+}
+
+local vi = {
+    loop = false,
+    start = false,
+    stop = false,
+    m1 = false,
+    m2 = false,
+}
+
+--
+-- Getting user input.
+--
+
+function get_reply_demo()
+    -- Within mpv, getting user input appears to happen asynchronously,
+    -- so the process cannot happen in a natural sequential fashion.
+    -- You have to supply a reply-handling function. Any state needed
+    -- by the handler can be passed along.
+    get_reply(
+        'foo: ',
+        handle_fubb_reply,
+        nil,
+        {prefix = 'PRE-', val = 99}
+    )
 end
 
-function get_reply(prompt, handler, default, forward)
+function handle_fubb_reply(reply, err, t)
+    -- The handler gets the reply, an error or nil, and any state
+    -- information passed by the original get_reply() caller.
+    if err then
+        message(err)
+    else
+        message(t.prefix .. reply .. ' ' .. t.val)
+    end
+end
+
+function get_reply(prompt, handler, default_reply, data_to_handler)
+    -- See get_user_input() docs for other properties, but
+    -- the basic ones are shown here.
     local t = {
         request_text = prompt,
-        default_input = default,
+        default_input = default_reply,
         source = 'LoopLlama',
     }
-    input.get_user_input(handler, t, forward)
+    input.get_user_input(handler, t, data_to_handler)
 end
 
-function handle_fubb_reply(reply, err, k)
-    message(k .. reply)
+--
+-- Utilities.
+--
+
+function log(...)
+    mp.msg.log('info', ...)
 end
 
-function show_text(text, duration, font_size)
-    mp.command(
-        'show-text "${osd-ass-cc/0}{\\\\fs' ..
-        font_size ..
-        '}' .. 
-        '{\\\\pos(10,10)}' ..
-        text ..
-        '${osd-ass-cc/1}' ..
-        '" ' ..
-        duration
-    )
-
-    sleep(1)
-    mp.command(
-        'show-text "${osd-ass-cc/0}{\\\\fs' ..
-        font_size ..
-        '}' .. 
-        '{\\\\pos(90,90)}' ..
-        text ..
-        '${osd-ass-cc/1}' ..
-        '" ' ..
-        duration
-    )
-
-end
-
-function sleep(n)
-  os.execute("sleep " .. tonumber(n))
-end
-
-function drawMenu()
-    --[[
-
-    # Font size
-
-        "{\\fs10}"
-
-    ass:append("{\\pos(200,200)}")
-
-    ass:append("{\\fnTimes New Roman}")
-
-    --]]
-    --
-    if false then
-
-        -- show_text('{\\\\b1}LoopLlama{\\\\b0}: loop and scoop', 3000, 10)
-        -- message("{\\fs10}{\\b1}LoopLlama{\\b0}\\N")
-
-    else
-
-        local window_w, window_h = mp.get_osd_size()
-
-        -- local ass = assdraw.ass_new()
-        -- ass:new_event()
-        -- ass:append("{\\pos(300,100)}300,100\\N")
-        -- mp.set_osd_ass(window_w, window_h, ass.text)
-
-        ass = assdraw.ass_new()
-        ass:new_event()
-        ass:append("{\\pos(100,100)}{\\b1}LoopLlama{\\b0}\\N")
-        ass:new_event()
-        ass:append("{\\pos(100,500)}{\\b1}LoopLlama{\\b0}\\N")
-        ass:new_event()
-        ass:append("{\\pos(500,100)}{\\b1}LoopLlama{\\b0}\\N")
-        ass:new_event()
-        ass:append("{\\pos(500,500)}{\\b1}LoopLlama{\\b0}\\N")
-        mp.set_osd_ass(window_w, window_h, ass.text)
-
-        get_reply('Enter message:', handle_fubb_reply, nil, 'PREFIX - ')
-
-    end
-
-end
-
-function clearMenu()
-    local window_w, window_h = mp.get_osd_size()
-    mp.set_osd_ass(window_w, window_h, '')
-    mp.osd_message('', 0)
-end
-
-function iif(predicate, a, b)
-    if predicate then
+function iif(val, a, b)
+    if val then
         return a
     else
         return b
@@ -288,116 +98,93 @@ function rounded(n, digits, default)
     end
 end
 
+--
+-- MISC OTHER.
+--
+
+function message(text, duration)
+    local ass = mp.get_property_osd('osd-ass-cc/0')
+    return mp.osd_message(ass .. text, duration or options.message_duration)
+end
+
+function clearMenu()
+    local window_w, window_h = mp.get_osd_size()
+    mp.set_osd_ass(window_w, window_h, '')
+    mp.osd_message('', 0)
+end
+
 function displayLoop()
     local msg = table.concat({
         'Loop: ',
-        rounded(ab.start, 2, EMPTY),
+        rounded(vi.start, 2, DEFS.empty),
         ' - ',
-        rounded(ab.stop, 2, EMPTY),
+        rounded(vi.stop, 2, DEFS.empty),
         ' [',
-        iif(looping, 'on', 'off'),
+        iif(vi.loop, 'on', 'off'),
         ']',
     })
     clearMenu()
     message(msg)
 end
 
-function setStartTime()
-    ab.start = mp.get_property_number('time-pos')
+function set_loop_start()
+    vi.start = mp.get_property_number('time-pos')
     displayLoop()
 end
 
-function setEndTime()
-    ab.stop = mp.get_property_number('time-pos')
+function set_loop_stop()
+    vi.stop = mp.get_property_number('time-pos')
     displayLoop()
 end
 
 function on_timepos_change()
     local curr = mp.get_property_number('time-pos')
-    if ab.stop and curr and curr >= ab.stop then
-        mp.set_property_native('time-pos', ab.start)
+    if vi.stop and curr and curr >= vi.stop then
+        mp.set_property_native('time-pos', vi.start)
     end
 end
 
-function loop()
-    if looping == false then
-        if ab.start and ab.stop then
-            looping = true
+function toggle_looping()
+    if vi.loop == false then
+        if vi.start and vi.stop then
+            vi.loop = true
             mp.observe_property('time-pos', 'string', on_timepos_change)
             displayLoop()
         end
     else
-        looping = false
+        vi.loop = false
         mp.unobserve_property(on_timepos_change)
         displayLoop()
     end
 end
 
-function dolog(x)
-    mp.msg.log('info', x)
-end
-
 function write_input_bindings()
     local x = mp.get_property_native('input-bindings')
     local j = utils.format_json(x)
-    -- local path = 'file://~/down/input-bindings.json'
     local path = '/Users/mhindman/Downloads/input-bindings.json'
     local fh = io.open(path, 'w')
     fh:write(j)
     fh:close()
 end
 
-local keys_bound = false
-
 function main()
 
-    -- local r = mp.command_native({
-    --     name = "subprocess",
-    --     playback_only = false,
-    --     capture_stdout = true,
-    --     args = {"cat", "/proc/cpuinfo"},
-    -- })
-    -- if r.status == 0 then
-    --     print("result: " .. r.stdout)
-    -- end
-
-    -- mp.comand_native({
-    --     key = "l",
-    --     section = "default",
-    --     cmd = "ignore",
-    --     priority = 11,
-    --     is_weak = false,
-    -- })
-
-    if keys_bound then
-        mp.remove_key_binding('set-start-time')
-        mp.remove_key_binding('set-end-time')
-        mp.remove_key_binding('toggle-loop')
+    if app.keys_bound then
+        mp.remove_key_binding('set-loop-start')
+        mp.remove_key_binding('set-loop-stop')
+        mp.remove_key_binding('toggle-looping')
         mp.remove_key_binding('clear-menu')
-        keys_bound = false
+        app.keys_bound = false
         message('bindings cleared')
     else
-        mp.add_forced_key_binding('[', 'set-start-time', setStartTime)
-        mp.add_forced_key_binding(']', 'set-end-time', setEndTime)
-        mp.add_forced_key_binding('l-l', 'toggle-loop', loop)
-        mp.add_forced_key_binding('l-f', 'favorites', favorites)
+        mp.add_forced_key_binding('[', 'set-loop-start', set_loop_start)
+        mp.add_forced_key_binding(']', 'set-loop-stop', set_loop_stop)
+        mp.add_forced_key_binding('l-l', 'toggle-looping', toggle_looping)
         mp.add_forced_key_binding('ESC', 'clear-menu', clearMenu)
-        keys_bound = true
-        drawMenu()
+        app.keys_bound = true
+        log('hello', 'world')
     end
 end
 
-function blort(x, y, z)
-    dolog(x)
-    dolog(y)
-    dolog(z)
-    message('blort')
-end
-
-function favorites()
-    message('favorites')
-end
-
--- mp.add_key_binding(options.keybind, 'display-multiloop', main)
-mp.add_forced_key_binding("L", 'display-multiloop', main)
+mp.add_forced_key_binding('L', 'toggle-app-bindings', main)
 

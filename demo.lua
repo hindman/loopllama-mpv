@@ -23,6 +23,19 @@ function io_examples()
     print(msg)
 end
 
+function show_text(txt, duration, font_size)
+    -- Using mp.command() to show some text with ASS tags.
+    local fmt = '${osd-ass-cc/0}{\\\\fs%d}{\\\\pos(10,10)}%s${osd-ass-cc/1}'
+    txt = string.format(fmt, font_size, txt)
+    local cmd = string.format('show-text "%s" %d', txt, duration)
+    mp.command(cmd)
+end
+
+function sleep(n)
+    -- Sleep. Simplest way is to outsource to the OS.
+    os.execute("sleep " .. tonumber(n))
+end
+
 function parsing_cli()
     local txt = table.concat(arg, ' ')
     local xs, n = parse_words(txt)
