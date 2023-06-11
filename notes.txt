@@ -11,31 +11,28 @@ toc: Table of contents
 todos: TODOs
 --------
 
-NEXT:
+Minimal prototype:
 
-    - Minimal prototype:
-
-        - Bindings:
+    x Toggle app bindings:
+        - Set/unset the app's key bindings.
             L
             [  ]
             l-l
             l-m
+            ESC
             1  2
 
-        - Toggle app shortcuts:
-            - Set/unset the app's key bindings.
+    x Basic looping:
+        - Set start/end to current time
+        - Toggle.
 
-        - Basic looping:
-            - Set start/end to current time
-            - Toggle.
+    x Basic marks:
+        - Set mark to current time.
+        - Jump to mark.
 
-        - Basic marks:
-            - Set mark to current time.
-            - Jump to mark.
-
-        - Persistence:
-            - Load on start.
-            - Save on shutdown.
+    - Persistence:
+        - Load on start.
+        - Save on shutdown.
 
 --------
 dev-notes: Dev notes

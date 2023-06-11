@@ -13,10 +13,19 @@ local input = require 'user-input-module'
 -- Constants.
 --
 
+local CON = {
+    app = 'LoopLlama',
+}
+
 local DEFS = {
     empty = '_',
-    keybind = 'L',
-    message_duration = 2
+    msg_duration = 2,
+}
+
+local PROPS = {
+    time_pos = 'time-pos',
+    disable_ass_seq = 'osd-ass-cc/0',
+    enable_ass_seq = 'osd-ass-cc/1',
 }
 
 --
@@ -56,9 +65,9 @@ function handle_fubb_reply(reply, err, t)
     -- The handler gets the reply, an error or nil, and any state
     -- information passed by the original get_reply() caller.
     if err then
-        message(err)
+        display(err)
     else
-        message(t.prefix .. reply .. ' ' .. t.val)
+        display(t.prefix .. reply .. ' ' .. t.val)
     end
 end
 
@@ -68,7 +77,7 @@ function get_reply(prompt, handler, default_reply, data_to_handler)
     local t = {
         request_text = prompt,
         default_input = default_reply,
-        source = 'LoopLlama',
+        source = CON.app,
     }
     input.get_user_input(handler, t, data_to_handler)
 end
@@ -81,8 +90,8 @@ function log(...)
     mp.msg.log('info', ...)
 end
 
-function iif(val, a, b)
-    if val then
+function iff(cond, a, b)
+    if cond then
         return a
     else
         return b
@@ -90,101 +99,180 @@ function iif(val, a, b)
 end
 
 function rounded(n, digits, default)
-    if n == nil then
-        return default
-    else
+    if n then
         local fmt = string.format('%%0.%sf', digits)
         return string.format(fmt, n)
+    else
+        return default
     end
 end
 
---
--- MISC OTHER.
---
-
-function message(text, duration)
-    local ass = mp.get_property_osd('osd-ass-cc/0')
-    return mp.osd_message(ass .. text, duration or options.message_duration)
+function get_current_pos()
+    return mp.get_property_number(PROPS.time_pos)
 end
 
-function clearMenu()
-    local window_w, window_h = mp.get_osd_size()
-    mp.set_osd_ass(window_w, window_h, '')
+function to_json(x)
+    -- Convert object to JSON.
+    return utils.format_json(x)
+end
+
+function write_file(txt, path)
+    -- Write text to a file.
+    local fh = io.open(path, 'w')
+    fh:write(txt)
+    fh:close()
+end
+
+--
+-- Displaying text on screen.
+--
+
+function display(text, duration, allow_ass_seq)
+    local ass = mp.get_property_osd(iff(
+        allow_ass_seq,
+        PROPS.enable_ass_seq,
+        PROPS.disable_ass_seq
+    ))
+    return mp.osd_message(ass .. text, duration or DEFS.msg_duration)
+end
+
+function clear_display()
+    local w, h = mp.get_osd_size()
+    mp.set_osd_ass(w, h, '')
     mp.osd_message('', 0)
 end
 
-function displayLoop()
+function display_current_loop()
     local msg = table.concat({
         'Loop: ',
         rounded(vi.start, 2, DEFS.empty),
         ' - ',
         rounded(vi.stop, 2, DEFS.empty),
         ' [',
-        iif(vi.loop, 'on', 'off'),
+        iff(vi.loop, 'on', 'off'),
         ']',
     })
-    clearMenu()
-    message(msg)
+    clear_display()
+    display(msg)
 end
 
+function display_marks()
+    local msg = table.concat({
+        'Marks: ',
+        rounded(vi.m1, 2, DEFS.empty),
+        ' / ',
+        rounded(vi.m2, 2, DEFS.empty),
+    })
+    clear_display()
+    display(msg)
+end
+
+function display_mark(n)
+    local m = 'm' .. n
+    local msg = table.concat({
+        'Mark ',
+        n,
+        ': ',
+        rounded(vi[m], 2, DEFS.empty),
+    })
+    clear_display()
+    display(msg)
+end
+
+--
+-- Manage settings for current loop.
+--
+
 function set_loop_start()
-    vi.start = mp.get_property_number('time-pos')
-    displayLoop()
+    vi.start = get_current_pos()
+    display_current_loop()
 end
 
 function set_loop_stop()
-    vi.stop = mp.get_property_number('time-pos')
-    displayLoop()
-end
-
-function on_timepos_change()
-    local curr = mp.get_property_number('time-pos')
-    if vi.stop and curr and curr >= vi.stop then
-        mp.set_property_native('time-pos', vi.start)
-    end
+    vi.stop = get_current_pos()
+    display_current_loop()
 end
 
 function toggle_looping()
-    if vi.loop == false then
-        if vi.start and vi.stop then
-            vi.loop = true
-            mp.observe_property('time-pos', 'string', on_timepos_change)
-            displayLoop()
-        end
-    else
+    local observer = on_timepos_change
+    if vi.loop then
+        -- Turn off looping.
         vi.loop = false
-        mp.unobserve_property(on_timepos_change)
-        displayLoop()
+        mp.unobserve_property(observer)
+        display_current_loop()
+    elseif vi.start and vi.stop then
+        -- Turn on looping if start/stop are defined.
+        vi.loop = true
+        mp.observe_property(PROPS.time_pos, 'string', observer)
+        display_current_loop()
     end
 end
 
-function write_input_bindings()
-    local x = mp.get_property_native('input-bindings')
-    local j = utils.format_json(x)
-    local path = '/Users/mhindman/Downloads/input-bindings.json'
-    local fh = io.open(path, 'w')
-    fh:write(j)
-    fh:close()
-end
-
-function main()
-
-    if app.keys_bound then
-        mp.remove_key_binding('set-loop-start')
-        mp.remove_key_binding('set-loop-stop')
-        mp.remove_key_binding('toggle-looping')
-        mp.remove_key_binding('clear-menu')
-        app.keys_bound = false
-        message('bindings cleared')
-    else
-        mp.add_forced_key_binding('[', 'set-loop-start', set_loop_start)
-        mp.add_forced_key_binding(']', 'set-loop-stop', set_loop_stop)
-        mp.add_forced_key_binding('l-l', 'toggle-looping', toggle_looping)
-        mp.add_forced_key_binding('ESC', 'clear-menu', clearMenu)
-        app.keys_bound = true
-        log('hello', 'world')
+function on_timepos_change()
+    local curr = get_current_pos()
+    if curr and (curr < vi.start or vi.stop < curr) then
+        seek_to(vi.start)
     end
 end
 
-mp.add_forced_key_binding('L', 'toggle-app-bindings', main)
+function seek_to(pos)
+    mp.set_property_native(PROPS.time_pos, pos)
+end
+
+--
+-- Manage marks.
+--
+
+function manage_marks()
+    get_reply('Enter mark N: ', manage_marks_handler, nil, get_current_pos())
+end
+
+function manage_marks_handler(reply, err, curr)
+    if not err and (reply == '1' or reply == '2') then
+        local m = 'm' .. reply
+        vi[m] = curr
+        display_marks()
+    end
+end
+
+function jump_to_mark(n)
+    local m = 'm' .. n
+    if vi[m] then
+        seek_to(vi[m])
+        display_mark(n)
+    end
+end
+
+function jump_to_mark_1() jump_to_mark(1) end
+function jump_to_mark_2() jump_to_mark(2) end
+
+--
+-- Set or unset the application's key bindings.
+--
+
+function toggle_app_bindings()
+    -- Key bindings.
+    local bindings = {
+        {key = '[', name = 'set-loop-start', func = set_loop_start},
+        {key = ']', name = 'set-loop-stop', func = set_loop_stop},
+        {key = 'l-l', name = 'toggle-looping', func = toggle_looping},
+        {key = 'l-m', name = 'manage-marks', func = manage_marks},
+        {key = 'KP1', name = 'jump-to-mark-1', func = jump_to_mark_1},
+        {key = 'KP2', name = 'jump-to-mark-2', func = jump_to_mark_2},
+        {key = 'ESC', name = 'clear-display', func = clear_display},
+    }
+    -- Set or unset the bindings.
+    for _, b in ipairs(bindings) do
+        if app.keys_bound then
+            mp.remove_key_binding(b.name)
+        else
+            mp.add_forced_key_binding(b.key, b.name, b.func)
+        end
+    end
+    -- Toggle state.
+    app.keys_bound = not app.keys_bound
+    display(CON.app .. iff(app.keys_bound, ' on', ' off'))
+end
+
+mp.add_forced_key_binding('L', 'toggle-app-bindings', toggle_app_bindings)
 

@@ -1,5 +1,6 @@
 
 function main()
+    --
 end
 
 --
@@ -41,6 +42,18 @@ function parsing_cli()
     local xs, n = parse_words(txt)
     xs.n = n
     print(dump(xs))
+end
+
+function to_json(x)
+    -- Convert object to JSON.
+    return utils.format_json(x)
+end
+
+function write_file(txt, path)
+    -- Write text to a file.
+    local fh = io.open(path, 'w')
+    fh:write(j)
+    fh:close()
 end
 
 --
@@ -157,5 +170,4 @@ function repr(x)
 end
 
 main()
-
 
