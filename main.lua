@@ -1,3 +1,5 @@
+-- TODO: bind l-i to display the info in vi
+
 --
 -- Imports.
 --
@@ -15,6 +17,7 @@ local input = require 'user-input-module'
 
 local CON = {
     app = 'LoopLlama',
+    app_data_path = '/Users/mhindman/Downloads/guitar/_loopllama.json',
 }
 
 local DEFS = {
@@ -26,23 +29,39 @@ local PROPS = {
     time_pos = 'time-pos',
     disable_ass_seq = 'osd-ass-cc/0',
     enable_ass_seq = 'osd-ass-cc/1',
+    path = 'path',
+}
+
+local EVENTS = {
+    shutdown = 'shutdown',
+    file_loaded = 'file-loaded',
 }
 
 --
 -- Overall state for the app and the current video.
 --
 
-local app = {
-    keys_bound = false,
-}
+function new_app()
+    return {
+        is_active = false,
+        vids = {},
+        favs = {},
+    }
+end
 
-local vi = {
-    loop = false,
-    start = false,
-    stop = false,
-    m1 = false,
-    m2 = false,
-}
+function new_vi(path)
+    return {
+        path = path or false,
+        loop = false,
+        start = false,
+        stop = false,
+        m1 = false,
+        m2 = false,
+    }
+end
+
+local app = new_app()
+local vi = new_vi()
 
 --
 -- Getting user input.
@@ -109,6 +128,10 @@ end
 
 function get_current_pos()
     return mp.get_property_number(PROPS.time_pos)
+end
+
+function get_current_path()
+    return mp.get_property(PROPS.path)
 end
 
 function to_json(x)
@@ -210,8 +233,10 @@ end
 
 function on_timepos_change()
     local curr = get_current_pos()
-    if curr and (curr < vi.start or vi.stop < curr) then
-        seek_to(vi.start)
+    if curr and vi.start and vi.stop then
+        if curr < vi.start or vi.stop < curr then
+            seek_to(vi.start)
+        end
     end
 end
 
@@ -263,16 +288,90 @@ function toggle_app_bindings()
     }
     -- Set or unset the bindings.
     for _, b in ipairs(bindings) do
-        if app.keys_bound then
+        if app.is_active then
             mp.remove_key_binding(b.name)
         else
             mp.add_forced_key_binding(b.key, b.name, b.func)
         end
     end
+    -- Events.
+    if app.is_active then
+        mp.unregister_event(on_shutdown)
+        mp.unregister_event(on_file_loaded)
+        persist()
+    else
+        mp.register_event(EVENTS.shutdown, on_shutdown)
+        mp.register_event(EVENTS.file_loaded, on_file_loaded)
+        load_app_settings()
+        load_vid_settings()
+    end
+
     -- Toggle state.
-    app.keys_bound = not app.keys_bound
-    display(CON.app .. iff(app.keys_bound, ' on', ' off'))
+    app.is_active = not app.is_active
+    display(CON.app .. iff(app.is_active, ' on', ' off'))
 end
 
 mp.add_forced_key_binding('L', 'toggle-app-bindings', toggle_app_bindings)
+
+--
+-- Preliminary stuff on events.
+--
+
+function on_file_loaded()
+    load_vid_settings()
+end
+
+function on_shutdown()
+    persist()
+end
+
+function persist()
+    write_file(to_json(app), CON.app_data_path)
+    log('persisted')
+end
+
+function load_vid_settings()
+    local path = get_current_path()
+    local t = app.vids[path]
+    if not t then
+        t = new_vi(path)
+        app.vids[path] = t
+    end
+    vi = t
+    log('loaded', to_json(vi))
+end
+
+function load_app_settings()
+    local txt = read_file(CON.app_data_path)
+    if txt then
+        local t = utils.parse_json(txt)
+        if t then
+            app = t
+        end
+    end
+    log('app-loaded', to_json(app))
+end
+
+function copy(x)
+    if type(x) == 'table' then
+        local t = {}
+        for k, v in pairs(x) do
+            t[k] = copy(v)
+        end
+        return t
+    else
+        return x
+    end
+end
+
+function read_file(path)
+    local fh = io.open(path)
+    if fh then
+        local txt = fh:read('a')
+        fh:close()
+        return txt
+    else
+        return nil
+    end
+end
 
